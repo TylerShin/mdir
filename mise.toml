@@ -1,0 +1,27 @@
+[tools]
+rust = { version = "1.92.0", profile = "minimal", components = "rustfmt,clippy" }
+
+[tasks.dev]
+description = "Run mDir"
+run = "cargo run --locked --"
+
+[tasks.build]
+description = "Build the standalone executable"
+run = "cargo build --release --locked"
+
+[tasks.fmt]
+run = "cargo fmt --all -- --check"
+
+[tasks.lint]
+run = "cargo clippy --locked --all-targets -- -D warnings"
+
+[tasks.test]
+run = "cargo test --locked"
+
+[tasks.check]
+description = "Format, lint and behavioral checks"
+depends = ["fmt", "lint", "test"]
+
+[tasks.bench]
+description = "Compare directory listing strategies on the same workload"
+run = "cargo run --release --locked -- --bench"

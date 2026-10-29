@@ -1,0 +1,21 @@
+[package]
+name = "mdir"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "Mdir-inspired keyboard file manager for modern terminals"
+authors = ["Tyler Shin <shincode@icloud.com>"]
+license = "MIT"
+repository = "https://github.com/TylerShin/mdir"
+readme = "README.md"
+
+[dependencies]
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm", "layout-cache"] }
+crossterm = "0.29"
+libc = "0.2"
+unicode-width = "0.2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

@@ -1,0 +1,100 @@
+name: Build, test and package
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v5.2.4
+        with:
+          version: '2026.10.22'
+      - name: Format, lint and behavioral tests
+        run: mise run check
+      - name: Install release target
+        run: mise exec -- rustup target add ${{ matrix.target }}
+      - name: Build standalone executable
+        run: mise exec -- cargo build --release --locked --target ${{ matrix.target }}
+      - name: Verify standalone Linux linkage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          python3 - "target/${{ matrix.target }}/release/mdir" <<'PY'
+          import subprocess
+          import sys
+          binary = sys.argv[1]
+          headers = subprocess.check_output(["readelf", "-l", binary], text=True)
+          dynamic = subprocess.check_output(["readelf", "-d", binary], text=True)
+          assert "INTERP" not in headers, "Binary requires an external ELF interpreter"
+          assert "(NEEDED)" not in dynamic, "Binary requires shared libraries"
+          print("PASS: no external interpreter or shared libraries")
+          PY
+      - name: Exercise release binary
+        shell: bash
+        run: |
+          exe="target/${{ matrix.target }}/release/mdir"
+          if [ "$RUNNER_OS" = Windows ]; then exe="$exe.exe"; fi
+          "$exe" --version
+          "$exe" --help
+      - name: Terminal workflow smoke
+        if: runner.os != 'Windows'
+        shell: bash
+        run: python3 scripts/smoke.py target/${{ matrix.target }}/release/mdir
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          suffix=''
+          if [ "$RUNNER_OS" = Windows ]; then suffix='.exe'; fi
+          cp "target/${{ matrix.target }}/release/mdir$suffix" "dist/mdir-${{ matrix.target }}$suffix"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mdir-${{ matrix.target }}
+          path: dist/mdir-*
+          if-no-files-found: error
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: mdir-*
+          merge-multiple: true
+          path: dist
+      - name: Checksums and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          cp scripts/install.sh scripts/install.ps1 dist/
+          cd dist
+          sha256sum mdir-* > SHA256SUMS
+          gh release create "$RELEASE_TAG" --verify-tag --generate-notes --title "mDir $RELEASE_TAG" ./*
